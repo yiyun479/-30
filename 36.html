@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>思维画布 Pro - 晓晓的终极工作台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { --bg-dot: #e5e7eb; }
+        body { height: 100dvh; overflow: hidden; touch-action: none; background: #fafaf9; color: #1c1917; font-family: sans-serif; }
+        .canvas-bg { background-image: radial-gradient(var(--bg-dot) 1.2px, transparent 1.2px); background-size: 32px 32px; }
+        #sidebar { z-index: 300; }
+        .edit-mode .chat-check { display: block !important; }
+        #viewport { transform-origin: 0 0; position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; will-change: transform; transition: transform 0.05s linear; }
+        #svg-canvas { position: absolute; top: 0; left: 0; width: 10000px; height: 10000px; pointer-events: none; z-index: 10; overflow: visible; }
+        .connector-line { fill: none; stroke-width: 3; stroke-dasharray: 8; animation: dash 20s linear infinite; pointer-events: stroke; cursor: pointer; transition: stroke 0.3s; }
+        @keyframes dash { from { stroke-dashoffset: 400; } to { stroke-dashoffset: 0; } }
+        
+        /* 节点容器优化 */
+        .node { position: absolute; min-width: 260px; max-width: 340px; border-radius: 20px; border-width: 2px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.08); z-index: 20; padding: 16px; background: white; pointer-events: auto; display: flex; flex-direction: column; }
+        .node.collapsed { height: 60px !important; padding-bottom: 0 !important; overflow: hidden !important; }
+        
+        /* 头部布局修复：确保所有图标可见 */
+        .node-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; width: 100%; }
+        .title-line { flex: 1; height: 1px; background: #e5e7eb; min-width: 20px; }
+        .node-title-input { font-size: 11px; font-weight: bold; color: #71717a; outline: none; background: transparent; width: 60px; }
+        
+        .content-body { max-height: 280px; overflow-y: auto; font-size: 13px; line-height: 1.6; word-break: break-all; }
+        .content-body::-webkit-scrollbar { width: 4px; }
+        .content-body::-webkit-scrollbar-thumb { background: #e5e7eb; border-radius: 10px; }
+        
+        /* 图标样式增强 */
+        .btn-icon { opacity: 0.8; transition: all 0.2s; cursor: pointer; font-style: normal; font-size: 16px; display: flex; align-items: center; justify-content: center; user-select: none; }
+        .btn-icon:hover { opacity: 1; transform: scale(1.2); }
+        .pin-btn { color: #ef4444; font-weight: bold; }
+        
+        #line-menu { position: fixed; display: none; background: white; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-radius: 12px; padding: 8px; gap: 8px; z-index: 500; border: 1px solid #e5e7eb; }
+        .fab-group { position: absolute; bottom: 32px; right: 24px; display: flex; flex-direction: column; gap: 16px; z-index: 150; }
+        .fab-btn { width: 52px; height: 52px; background: white; border-radius: 50%; box-shadow: 0 6px 16px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .node-white { background: #ffffff; border-color: #e5e7eb; }
+        .node-brown { background: #78350f; border-color: #451a03; color: #fef3c7; }
+        .node-brown .node-title-input { color: #fef3c7; }
+        .node-brown .title-line { background: #92400e; }
+    </style>
+</head>
+<body>
+    <header class="h-14 bg-white border-b flex justify-between items-center px-4 z-[100] relative">
+        <div class="flex items-center gap-3">
+            <button onclick="toggleSidebar()" class="p-2">☰</button>
+            <h1 id="topTitle" class="font-bold text-sm">晓晓的工作台</h1>
+        </div>
+        <div id="normalActions">
+            <button onclick="toggleView()" id="viewToggleBtn" class="bg-blue-600 text-white px-5 py-2 rounded-full text-xs font-bold shadow-md">去脑图画布</button>
+        </div>
+        <div id="editActions" class="hidden flex items-center gap-3">
+            <span id="selectCount" class="text-xs font-bold text-blue-600">已选 0</span>
+            <button onclick="addSelectedToCanvas()" class="bg-blue-600 text-white px-4 py-2 rounded-full text-[10px]">拼贴到画布</button>
+            <button onclick="exitEditMode()" class="text-[10px] text-stone-400">取消</button>
+        </div>
+    </header>
+
+    <main class="flex-1 flex relative h-[calc(100dvh-56px)] overflow-hidden">
+        <div id="sidebar" class="fixed inset-y-0 left-0 w-72 bg-white shadow-2xl transform -translate-x-full flex flex-col transition-transform z-[300]">
+            <div class="p-4 border-b flex justify-between items-center bg-stone-50">
+                <span id="sidebarTitle" class="font-bold text-sm">记录列表</span>
+                <button id="sidebarNewBtn" class="text-blue-600 text-sm font-bold">＋ 新建</button>
+            </div>
+            <div id="sidebarList" class="flex-1 overflow-y-auto p-2"></div>
+            <div class="p-4 border-t"><button onclick="toggleConfig()" class="w-full py-2 bg-stone-100 rounded-lg text-xs font-bold">⚙️ 系统设置</button></div>
+        </div>
+
+        <section id="chatSection" class="w-full md:w-1/2 flex flex-col bg-white border-r h-full">
+            <div id="chatCanvas" class="canvas-bg flex-1 overflow-y-auto p-4 space-y-6 pb-24"></div>
+            <div class="p-4 bg-white border-t flex gap-2">
+                <textarea id="userInput" rows="1" placeholder="和 AI 聊聊..." class="flex-1 p-3 bg-stone-100 rounded-2xl text-sm outline-none resize-none"></textarea>
+                <button onclick="askAI()" class="bg-blue-600 text-white w-12 h-11 rounded-2xl flex items-center justify-center text-xl shadow-md">🚀</button>
+            </div>
+        </section>
+
+        <section id="mindMapSection" class="hidden flex-1 relative bg-stone-100 overflow-hidden canvas-bg">
+            <div id="viewport">
+                <svg id="svg-canvas" onclick="document.getElementById('line-menu').style.display='none'"><g id="lines-group"></g></svg>
+                <div id="mindmap-container" class="absolute inset-0"></div>
+            </div>
+            <div id="line-menu" class="flex items-center">
+                <div onclick="changeLineColor('#cbd5e1')" class="w-6 h-6 rounded-full bg-slate-300 cursor-pointer"></div>
+                <div onclick="changeLineColor('#3b82f6')" class="w-6 h-6 rounded-full bg-blue-500 cursor-pointer"></div>
+                <div onclick="changeLineColor('#ef4444')" class="w-6 h-6 rounded-full bg-red-500 cursor-pointer"></div>
+                <div class="w-px h-6 bg-stone-200 mx-1"></div>
+                <button onclick="deleteLine()" class="text-xs text-red-500 font-bold px-2">删除线</button>
+            </div>
+            <div class="fab-group">
+                <button onclick="resetZoom()" class="fab-btn font-black text-[10px]">1:1</button>
+                <button onclick="clearCanvas()" class="fab-btn text-xl">🗑️</button>
+                <button onclick="addManualNodePrompt()" class="fab-btn text-2xl">✍️</button>
+            </div>
+        </section>
+    </main>
+
+    <div id="configPanel" class="hidden fixed inset-0 flex items-center justify-center p-6 bg-black/20 backdrop-blur-md z-[400]">
+        <div class="bg-white rounded-[32px] p-8 w-full max-w-sm space-y-4">
+            <input type="password" id="apiKey" placeholder="API Key" class="w-full p-4 bg-stone-100 rounded-2xl outline-none">
+            <input type="text" id="baseUrl" placeholder="代理地址" class="w-full p-4 bg-stone-100 rounded-2xl outline-none">
+            <div class="flex gap-2">
+                <input type="text" id="modelName" placeholder="模型名称" class="flex-1 p-4 bg-stone-100 rounded-2xl outline-none">
+                <button onclick="fetchModels()" class="px-4 bg-stone-200 rounded-2xl text-[10px] font-bold">拉取</button>
+            </div>
+            <select id="modelSelect" class="hidden w-full p-4 bg-stone-100 rounded-2xl outline-none text-sm" onchange="document.getElementById('modelName').value=this.value"></select>
+            <button onclick="saveConfig()" class="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold">保存配置</button>
+        </div>
+    </div>
+    <div id="overlay" onclick="closeSidebar()" class="hidden fixed inset-0 bg-black/30 z-[250]"></div>
+
+    <script>
+        let sessions = JSON.parse(localStorage.getItem('cv_sessions') || '[]');
+        let currentSid = localStorage.getItem('cv_current_sid') || '';
+        let mindmaps = JSON.parse(localStorage.getItem('cv_maps') || '[]');
+        let currentMid = localStorage.getItem('cv_current_mid') || '';
+        let cvState = { scale: 1, x: 0, y: 0 }, isViewMindMap = false, selectedNodeForLink = null, selectedLineIdx = null;
+
+        window.onload = () => {
+            if(!currentSid && sessions.length === 0) createNewSession(); else loadSession(currentSid);
+            if(!currentMid && mindmaps.length > 0) currentMid = mindmaps[0].id; else if(!currentMid) createNewMindMap();
+            document.getElementById('sidebarNewBtn').onclick = handleNewItem;
+            initConfig(); applyTransform();
+        };
+
+        const mapArea = document.getElementById('mindMapSection');
+        mapArea.addEventListener('wheel', (e) => {
+            if (!isViewMindMap) return;
+            e.preventDefault();
+            const factor = e.deltaY > 0 ? 0.9 : 1.1;
+            const rect = mapArea.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            const bx = (mx - cvState.x) / cvState.scale, by = (my - cvState.y) / cvState.scale;
+            cvState.scale = Math.min(Math.max(cvState.scale * factor, 0.1), 3);
+            cvState.x = mx - bx * cvState.scale;
+            cvState.y = my - by * cvState.scale;
+            applyTransform();
+        }, { passive: false });
+
+        let lastDist = 0;
+        mapArea.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2 && isViewMindMap) {
+                e.preventDefault();
+                const dist = Math.hypot(e.touches[0].pageX - e.touches[1].pageX, e.touches[0].pageY - e.touches[1].pageY);
+                if (lastDist > 0) {
+                    const factor = dist > lastDist ? 1.05 : 0.95;
+                    const mx = (e.touches[0].pageX + e.touches[1].pageX) / 2;
+                    const my = (e.touches[0].pageY + e.touches[1].pageY) / 2;
+                    const bx = (mx - cvState.x) / cvState.scale, by = (my - cvState.y) / cvState.scale;
+                    cvState.scale = Math.min(Math.max(cvState.scale * factor, 0.1), 3);
+                    cvState.x = mx - bx * cvState.scale;
+                    cvState.y = my - by * cvState.scale;
+                    applyTransform();
+                }
+                lastDist = dist;
+            }
+        }, { passive: false });
+        mapArea.addEventListener('touchend', () => lastDist = 0);
+
+        mapArea.onpointerdown = (e) => {
+            if (e.target.closest('.node') || e.target.closest('.fab-btn') || e.target.closest('#line-menu')) return;
+            let sx = e.clientX - cvState.x, sy = e.clientY - cvState.y;
+            const move = (ev) => { cvState.x = ev.clientX - sx; cvState.y = ev.clientY - sy; applyTransform(); };
+            const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+            window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+        };
+
+        function applyTransform() {
+            const vp = document.getElementById('viewport');
+            vp.style.transform = `translate(${cvState.x}px, ${cvState.y}px) scale(${cvState.scale})`;
+            renderLines();
+        }
+
+        function renderCanvasNodes() {
+            const container = document.getElementById('mindmap-container');
+            container.innerHTML = '';
+            const map = mindmaps.find(m => m.id === currentMid);
+            if(!map) return;
+            map.nodes.forEach(node => {
+                const div = document.createElement('div');
+                div.id = 'node-' + node.id;
+                div.className = `node ${node.color || 'node-white'} ${node.collapsed ? 'collapsed' : ''}`;
+                div.style.left = node.x + 'px'; div.style.top = node.y + 'px';
+                
+                // 确保 📍 溯源图标在头部布局中正确显示
+                const traceIcon = node.originSid ? `<i onclick="traceToOrigin('${node.originSid}', ${node.originIdx})" class="btn-icon pin-btn not-italic" title="溯源至原文">📍</i>` : '';
+
+                div.innerHTML = `
+                    <div class="node-header">
+                        <i onclick="changeColor('${node.id}', '${node.color === 'node-brown' ? 'node-white' : 'node-brown'}')" class="btn-icon not-italic">🎨</i>
+                        ${traceIcon}
+                        <div class="title-line"></div>
+                        <input class="node-title-input" value="${node.title || ''}" placeholder="标题" oninput="updateTitle('${node.id}', this.value)">
+                        <i onclick="startLinking('${node.id}')" class="btn-icon not-italic">🔗</i>
+                        <i onclick="toggleCollapse('${node.id}')" class="btn-icon not-italic">${node.collapsed ? '▲' : '▼'}</i>
+                        <i onclick="removeNode('${node.id}')" class="btn-icon not-italic font-bold text-red-400">×</i>
+                    </div>
+                    <div class="content-body" contenteditable="true" onblur="updateText('${node.id}', this.innerText)">${node.content}</div>`;
+                container.appendChild(div); makeDraggable(div, node.id);
+            });
+            renderLines();
+        }
+
+        function renderLines() {
+            const g = document.getElementById('lines-group');
+            if(!g) return; g.innerHTML = '';
+            const map = mindmaps.find(m => m.id === currentMid); if(!map) return;
+            map.conns.forEach((c, idx) => {
+                const s = document.getElementById('node-'+c.s), e = document.getElementById('node-'+c.e);
+                if(s && e) {
+                    const x1 = parseFloat(s.style.left) + s.offsetWidth/2, y1 = parseFloat(s.style.top) + (s.classList.contains('collapsed')?30:s.offsetHeight/2);
+                    const x2 = parseFloat(e.style.left) + e.offsetWidth/2, y2 = parseFloat(e.style.top) + (e.classList.contains('collapsed')?30:e.offsetHeight/2);
+                    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    p.setAttribute("d", `M ${x1} ${y1} C ${x1} ${(y1+y2)/2}, ${x2} ${(y1+y2)/2}, ${x2} ${y2}`);
+                    p.setAttribute("class", "connector-line"); 
+                    p.setAttribute("stroke", c.color || "#cbd5e1");
+                    p.onclick = (ev) => { ev.stopPropagation(); selectedLineIdx = idx; showLineMenu(ev); };
+                    g.appendChild(p);
+                }
+            });
+        }
+
+        function showLineMenu(e) { const m = document.getElementById('line-menu'); m.style.display = 'flex'; m.style.left = e.clientX + 'px'; m.style.top = e.clientY + 'px'; }
+        function changeLineColor(c) { const m = mindmaps.find(m => m.id === currentMid); if(selectedLineIdx !== null) m.conns[selectedLineIdx].color = c; saveAll(); renderLines(); document.getElementById('line-menu').style.display='none'; }
+        function deleteLine() { const m = mindmaps.find(m => m.id === currentMid); if(selectedLineIdx !== null) m.conns.splice(selectedLineIdx, 1); saveAll(); renderLines(); document.getElementById('line-menu').style.display='none'; }
+
+        function traceToOrigin(sid, idx) {
+            if(isViewMindMap) toggleView();
+            loadSession(sid);
+            setTimeout(() => {
+                const bubbles = document.querySelectorAll('.chat-bubble');
+                const target = bubbles[idx];
+                if(target) {
+                    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    target.classList.add('ring-4', 'ring-red-400');
+                    setTimeout(() => target.classList.remove('ring-4', 'ring-red-400'), 2500);
+                }
+            }, 300);
+        }
+
+        async function fetchModels() {
+            const k = document.getElementById('apiKey').value, u = document.getElementById('baseUrl').value;
+            if(!k || !u) return alert('请先填写 API 信息');
+            try {
+                const res = await fetch(`${u}/models`, { headers: {'Authorization': `Bearer ${k}`} });
+                const data = await res.json();
+                if(data.data) {
+                    const sel = document.getElementById('modelSelect');
+                    sel.innerHTML = data.data.map(m => `<option value="${m.id}">${m.id}</option>`).join('');
+                    sel.classList.remove('hidden');
+                }
+            } catch(e) { alert('拉取失败'); }
+        }
+
+        function handleNewItem() {
+            if(isViewMindMap) createNewMindMap(); else createNewSession();
+            renderSidebarList();
+        }
+
+        function addSelectedToCanvas() {
+            const map = mindmaps.find(m => m.id === currentMid);
+            document.querySelectorAll('.chat-check input:checked').forEach((c, i) => {
+                const bubble = c.closest('.flex').querySelector('.chat-bubble');
+                map.nodes.push({ id: 'n_'+Date.now()+i, type: 'note', content: bubble.innerText, x: (100 - cvState.x + (i*40))/cvState.scale, y: (150 - cvState.y + (i*40))/cvState.scale, originSid: currentSid, originIdx: parseInt(c.getAttribute('data-idx')), title: '' });
+            });
+            saveAll(); renderCanvasNodes(); exitEditMode();
+        }
+
+        function clearCanvas() { if(confirm('要清空这张脑图吗？')) { const m = mindmaps.find(m=>m.id===currentMid); m.nodes=[]; m.conns=[]; renderCanvasNodes(); saveAll(); } }
+        function removeNode(id) { const m = mindmaps.find(m=>m.id===currentMid); m.nodes = m.nodes.filter(n=>n.id!==id); m.conns = m.conns.filter(c=>c.s!==id && c.e!==id); renderCanvasNodes(); saveAll(); }
+        function changeColor(id, c) { const n = mindmaps.find(m=>m.id===currentMid).nodes.find(x=>x.id===id); n.color = c; saveAll(); renderCanvasNodes(); }
+        function resetZoom() { cvState = { scale: 1, x: 0, y: 0 }; applyTransform(); }
+        function toggleView() { isViewMindMap = !isViewMindMap; document.getElementById('chatSection').classList.toggle('hidden'); document.getElementById('mindMapSection').classList.toggle('hidden'); document.getElementById('viewToggleBtn').innerText = isViewMindMap ? "回聊天室" : "去脑图画布"; if(isViewMindMap) renderCanvasNodes(); }
+        function saveAll() { localStorage.setItem('cv_sessions', JSON.stringify(sessions)); localStorage.setItem('cv_maps', JSON.stringify(mindmaps)); localStorage.setItem('cv_current_sid', currentSid); localStorage.setItem('cv_current_mid', currentMid); }
+        function loadSession(id) { currentSid = id; const s = sessions.find(x=>x.id===id); document.getElementById('chatCanvas').innerHTML=''; if(s) s.nodes.forEach((n,i)=>addNodeUI(n.content,n.type,false,i)); closeSidebar(); }
+        function createNewSession() { const id='s_'+Date.now(); sessions.unshift({id,title:'新对话 '+new Date().toLocaleTimeString(),nodes:[],history:[]}); loadSession(id); }
+        function loadMindMap(id) { currentMid = id; saveAll(); renderCanvasNodes(); closeSidebar(); }
+        function createNewMindMap() { const id='m_'+Date.now(); mindmaps.unshift({id, title:'新脑图 '+new Date().toLocaleTimeString(), nodes:[], conns:[]}); loadMindMap(id); }
+        function toggleSidebar() { document.getElementById('sidebar').classList.toggle('-translate-x-full'); document.getElementById('overlay').classList.toggle('hidden'); renderSidebarList(); }
+        function closeSidebar() { document.getElementById('sidebar').classList.add('-translate-x-full'); document.getElementById('overlay').classList.add('hidden'); }
+        function renderSidebarList() {
+            const list = document.getElementById('sidebarList');
+            if(isViewMindMap) list.innerHTML = mindmaps.map(m => `<div onclick="loadMindMap('${m.id}')" class="p-4 text-xs rounded-2xl mb-2 truncate ${m.id === currentMid?'bg-blue-50 text-blue-600 font-bold border border-blue-100':'text-stone-500'}">🗺️ ${m.title}</div>`).join('');
+            else list.innerHTML = sessions.map(s => `<div onclick="loadSession('${s.id}')" class="p-4 text-xs rounded-2xl mb-2 truncate ${s.id === currentSid?'bg-blue-50 text-blue-600 font-bold border border-blue-100':'text-stone-500'}">💬 ${s.title}</div>`).join('');
+        }
+        function updateTitle(id, v) { const n = mindmaps.find(m=>m.id===currentMid).nodes.find(x=>x.id===id); if(n) n.title = v; saveAll(); }
+        function updateText(id, t) { const n = mindmaps.find(m=>m.id===currentMid).nodes.find(x=>x.id===id); if(n) n.content = t; saveAll(); }
+        function toggleCollapse(id) { const n = mindmaps.find(m=>m.id===currentMid).nodes.find(x=>x.id===id); if(n) n.collapsed = !n.collapsed; saveAll(); renderCanvasNodes(); }
+        function makeDraggable(el, id) {
+            el.onpointerdown = (e) => {
+                if (e.target.closest('i') || e.target.closest('input') || e.target.hasAttribute('contenteditable')) return;
+                e.stopPropagation(); el.setPointerCapture(e.pointerId);
+                let ox = parseFloat(el.style.left), oy = parseFloat(el.style.top), sx = e.clientX, sy = e.clientY;
+                el.onpointermove = (ev) => { el.style.left = (ox + (ev.clientX - sx)/cvState.scale) + 'px'; el.style.top = (oy + (ev.clientY - sy)/cvState.scale) + 'px'; renderLines(); };
+                el.onpointerup = () => { const n = mindmaps.find(m=>m.id===currentMid).nodes.find(x=>x.id===id); if(n) { n.x = parseFloat(el.style.left); n.y = parseFloat(el.style.top); } saveAll(); el.onpointermove = null; };
+            };
+        }
+        function startLinking(id) { if(!selectedNodeForLink) { selectedNodeForLink = id; document.getElementById('node-'+id).classList.add('ring-4','ring-blue-400'); } else { if(selectedNodeForLink !== id) mindmaps.find(m=>m.id===currentMid).conns.push({s: selectedNodeForLink, e: id, color:'#cbd5e1'}); selectedNodeForLink = null; document.querySelectorAll('.node').forEach(n=>n.classList.remove('ring-4','ring-blue-400')); renderCanvasNodes(); saveAll(); } }
+        async function askAI() {
+            const input = document.getElementById('userInput'), k = localStorage.getItem('chat_key'), u = localStorage.getItem('chat_url'), m = localStorage.getItem('chat_model');
+            if(!input.value || !k) return alert('请先配置并保存 API 信息');
+            const text = input.value; addNodeUI(text, 'user'); input.value = '';
+            const s = sessions.find(x => x.id === currentSid); s.history.push({role:"user", content:text});
+            try {
+                const res = await fetch(`${u}/chat/completions`, { method:'POST', headers:{'Content-Type':'application/json','Authorization':`Bearer ${k}`}, body:JSON.stringify({model:m, messages:s.history}) });
+                const data = await res.json(); const reply = data.choices[0].message.content;
+                addNodeUI(reply, 'ai'); s.history.push({role:"assistant", content:reply}); saveAll();
+            } catch(e) { addNodeUI('❌ 接口配置有误', 'ai'); }
+        }
+        function addNodeUI(content, type, isNew=true, idx=-1) {
+            const canvas = document.getElementById('chatCanvas'), isU = type === 'user';
+            const nodeIdx = idx === -1 ? (sessions.find(x => x.id === currentSid)?.nodes.length || 0) : idx;
+            const div = document.createElement('div');
+            div.className = `flex gap-3 ${isU?'flex-row-reverse':'flex-row'}`;
+            div.innerHTML = `<div class="w-9 h-9 bg-stone-200 rounded-full flex items-center justify-center text-xs shrink-0">${isU?'👤':'🤖'}</div>
+                <div class="max-w-[80%] flex flex-col ${isU?'items-end':'items-start'}">
+                    <div class="chat-bubble p-4 rounded-2xl shadow-sm border text-xs ${isU?'bg-blue-600 text-white border-blue-500':'bg-white text-stone-700'}" oncontextmenu="event.preventDefault();enterEditMode()">${content}</div>
+                    <div class="mt-1 chat-check hidden"><input type="checkbox" data-idx="${nodeIdx}" onchange="updateCounter()" class="w-4 h-4 accent-blue-600"></div>
+                </div>`;
+            canvas.appendChild(div); if(isNew) { sessions.find(x=>x.id===currentSid).nodes.push({content,type}); saveAll(); }
+            canvas.scrollTo(0, canvas.scrollHeight);
+        }
+        function addManualNodePrompt() { const m = mindmaps.find(m => m.id === currentMid); const id = 'm_'+Date.now(); m.nodes.push({ id, type:'note', content:'写点灵感...', x:(100-cvState.x)/cvState.scale, y:(150-cvState.y)/cvState.scale, color:'node-brown', title:'' }); renderCanvasNodes(); saveAll(); }
+        function enterEditMode() { document.body.classList.add('edit-mode'); document.getElementById('normalActions').classList.add('hidden'); document.getElementById('editActions').classList.remove('hidden'); }
+        function exitEditMode() { document.body.classList.remove('edit-mode'); document.getElementById('normalActions').classList.remove('hidden'); document.getElementById('editActions').classList.add('hidden'); document.querySelectorAll('.chat-check input').forEach(c=>c.checked=false); updateCounter(); }
+        function updateCounter() { document.getElementById('selectCount').innerText=`已选 ${document.querySelectorAll('.chat-check input:checked').length}`; }
+        function toggleConfig() { document.getElementById('configPanel').classList.toggle('hidden'); }
+        function saveConfig() { localStorage.setItem('chat_key', document.getElementById('apiKey').value); localStorage.setItem('chat_url', document.getElementById('baseUrl').value); localStorage.setItem('chat_model', document.getElementById('modelName').value); toggleConfig(); }
+        function initConfig() { document.getElementById('apiKey').value=localStorage.getItem('chat_key')||''; document.getElementById('baseUrl').value=localStorage.getItem('chat_url')||''; document.getElementById('modelName').value=localStorage.getItem('chat_model')||'gpt-4o'; }
+    </script>
+</body>
+</html>
